@@ -1,0 +1,22 @@
+# Databricks Job Monitoring Configuration
+# Add the jobs you want to monitor here
+
+jobs:
+  - job_id: 471331510338277
+    display_name: "All Forms Details and All Forms Queries"
+    
+  - job_id: 274716513263987
+    display_name: "E3 All forms (DB)"
+    
+  - job_id: 233202301765928
+    display_name: "E3 All forms (LTSS)"
+    
+  - job_id: 982290504189278
+    display_name: "Embold"
+    
+  - job_id: 590805324816327
+    display_name: "Energy Zoho (628_prescreening_post_medical_review)"
+    
+  - job_id: 101046463251105
+    display_name: "Zoho Embold"
+
