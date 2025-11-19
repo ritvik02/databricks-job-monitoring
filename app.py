@@ -8,8 +8,8 @@ from databricks.sdk import WorkspaceClient
 from databricks.sdk.service.jobs import RunLifeCycleState, RunResultState
 import pandas as pd
 
-# Load environment variables from env.example
-load_dotenv('env.example')
+# Load environment variables from .env file (local development)
+load_dotenv('.env')
 
 # Page configuration
 st.set_page_config(
@@ -47,8 +47,13 @@ def load_config():
 def init_databricks_client():
     """Initialize Databricks workspace client"""
     try:
-        host = os.getenv('DATABRICKS_HOST')
-        token = os.getenv('DATABRICKS_TOKEN')
+        # Try Streamlit secrets first (for deployed app), fall back to env vars (for local)
+        try:
+            host = st.secrets.get("DATABRICKS_HOST")
+            token = st.secrets.get("DATABRICKS_TOKEN")
+        except:
+            host = os.getenv('DATABRICKS_HOST')
+            token = os.getenv('DATABRICKS_TOKEN')
         
         if not host or not token:
             st.error("❌ Missing Databricks credentials. Please set DATABRICKS_HOST and DATABRICKS_TOKEN in your .env file.")
@@ -312,8 +317,12 @@ def main():
         
         # Connection status
         st.markdown("### Connection Status")
-        host = os.getenv('DATABRICKS_HOST')
-        token = os.getenv('DATABRICKS_TOKEN')
+        try:
+            host = st.secrets.get("DATABRICKS_HOST")
+            token = st.secrets.get("DATABRICKS_TOKEN")
+        except:
+            host = os.getenv('DATABRICKS_HOST')
+            token = os.getenv('DATABRICKS_TOKEN')
         
         if host and token:
             st.success("✅ Connected")

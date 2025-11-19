@@ -8,8 +8,8 @@ from dotenv import load_dotenv
 import os
 
 def main():
-    # Load environment variables from env.example
-    load_dotenv('env.example')
+    # Load environment variables from .env file
+    load_dotenv('.env')
     
     host = os.getenv('DATABRICKS_HOST')
     token = os.getenv('DATABRICKS_TOKEN')
