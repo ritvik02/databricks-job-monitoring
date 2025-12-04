@@ -3,10 +3,14 @@ import os
 import yaml
 import time
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.service.jobs import RunLifeCycleState, RunResultState
 import pandas as pd
+
+# Configure your timezone here
+DISPLAY_TIMEZONE = "America/New_York"  # US Eastern Time
 
 # Load environment variables from .env file (local development)
 load_dotenv('.env')
@@ -133,10 +137,13 @@ def get_status_info(state, result_state=None):
 
 
 def format_timestamp(ts_ms):
-    """Format timestamp from milliseconds to readable format"""
+    """Format timestamp from milliseconds to readable format in configured timezone"""
     if ts_ms:
-        dt = datetime.fromtimestamp(ts_ms / 1000)
-        return dt.strftime("%Y-%m-%d %H:%M:%S")
+        # Convert from UTC timestamp to timezone-aware datetime
+        utc_dt = datetime.fromtimestamp(ts_ms / 1000, tz=ZoneInfo("UTC"))
+        # Convert to display timezone
+        local_dt = utc_dt.astimezone(ZoneInfo(DISPLAY_TIMEZONE))
+        return local_dt.strftime("%Y-%m-%d %H:%M:%S")
     return "N/A"
 
 
