@@ -1,3 +1,8 @@
+"""
+Praxis Databricks Job Monitoring System
+Monitor, trigger, and manage Databricks jobs in real-time
+"""
+
 import streamlit as st
 import os
 import yaml
@@ -9,25 +14,30 @@ from databricks.sdk import WorkspaceClient
 from databricks.sdk.service.jobs import RunLifeCycleState, RunResultState
 import pandas as pd
 
-# Configure your timezone here
-DISPLAY_TIMEZONE = "America/New_York"  # US Eastern Time
-
 # Load environment variables from .env file (local development)
 load_dotenv('.env')
 
+# Import custom modules
+from config import Config
+from utils.styles import get_custom_css
+from utils.sidebar import render_sidebar
+
 # Page configuration
 st.set_page_config(
-    page_title="Databricks Job Monitor",
-    page_icon="🔄",
+    page_title=f"Praxis | {Config.APP_TITLE}",
+    page_icon=Config.APP_ICON,
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+# Apply custom CSS
+st.markdown(get_custom_css(), unsafe_allow_html=True)
 
 # Initialize session state
 if 'auto_refresh' not in st.session_state:
     st.session_state.auto_refresh = False
 if 'refresh_interval' not in st.session_state:
-    st.session_state.refresh_interval = 30
+    st.session_state.refresh_interval = Config.DEFAULT_REFRESH_INTERVAL
 if 'last_refresh' not in st.session_state:
     st.session_state.last_refresh = time.time()
 if 'selected_job' not in st.session_state:
@@ -112,28 +122,28 @@ def cancel_job_run(client, run_id):
 
 
 def get_status_info(state, result_state=None):
-    """Get status display information (emoji, color, text)"""
+    """Get status display information (emoji, color, text, css_class)"""
     if state == RunLifeCycleState.RUNNING or state == RunLifeCycleState.PENDING:
-        return "🔵", "#1f77b4", "RUNNING"
+        return "🔵", Config.STATUS_RUNNING, "RUNNING", "status-running"
     elif state == RunLifeCycleState.TERMINATING:
-        return "⚠️", "#ff7f0e", "TERMINATING"
+        return "⚠️", Config.STATUS_WARNING, "TERMINATING", "status-warning"
     elif state == RunLifeCycleState.TERMINATED:
         if result_state == RunResultState.SUCCESS:
-            return "✅", "#2ca02c", "SUCCESS"
+            return "✅", Config.STATUS_SUCCESS, "SUCCESS", "status-success"
         elif result_state == RunResultState.FAILED:
-            return "❌", "#d62728", "FAILED"
+            return "❌", Config.STATUS_FAILED, "FAILED", "status-failed"
         elif result_state == RunResultState.CANCELED:
-            return "🚫", "#9467bd", "CANCELED"
+            return "🚫", Config.STATUS_CANCELED, "CANCELED", "status-canceled"
         elif result_state == RunResultState.TIMEDOUT:
-            return "⏱️", "#e377c2", "TIMEOUT"
+            return "⏱️", Config.STATUS_TIMEOUT, "TIMEOUT", "status-timeout"
         else:
-            return "⚪", "#7f7f7f", "TERMINATED"
+            return "⚪", Config.STATUS_NEUTRAL, "TERMINATED", "status-neutral"
     elif state == RunLifeCycleState.SKIPPED:
-        return "⏭️", "#bcbd22", "SKIPPED"
+        return "⏭️", Config.STATUS_WARNING, "SKIPPED", "status-warning"
     elif state == RunLifeCycleState.INTERNAL_ERROR:
-        return "⚠️", "#d62728", "ERROR"
+        return "⚠️", Config.STATUS_FAILED, "ERROR", "status-failed"
     else:
-        return "⚪", "#7f7f7f", str(state)
+        return "⚪", Config.STATUS_NEUTRAL, str(state), "status-neutral"
 
 
 def format_timestamp(ts_ms):
@@ -142,7 +152,7 @@ def format_timestamp(ts_ms):
         # Convert from UTC timestamp to timezone-aware datetime
         utc_dt = datetime.fromtimestamp(ts_ms / 1000, tz=ZoneInfo("UTC"))
         # Convert to display timezone
-        local_dt = utc_dt.astimezone(ZoneInfo(DISPLAY_TIMEZONE))
+        local_dt = utc_dt.astimezone(ZoneInfo(Config.DISPLAY_TIMEZONE))
         return local_dt.strftime("%Y-%m-%d %H:%M:%S")
     return "N/A"
 
@@ -163,7 +173,7 @@ def calculate_duration(start_ms, end_ms):
 
 
 def display_job_card(client, job_config):
-    """Display a job monitoring card"""
+    """Display a job monitoring card with Praxis styling"""
     job_id = job_config['job_id']
     display_name = job_config.get('display_name', f'Job {job_id}')
     
@@ -173,7 +183,22 @@ def display_job_card(client, job_config):
         return
     
     # Get job runs
-    runs = get_job_runs(client, job_id, limit=10)
+    runs = get_job_runs(client, job_id, limit=Config.DEFAULT_RUN_HISTORY_LIMIT)
+    
+    # Determine status for card styling
+    card_class = "job-card"
+    if runs and len(runs) > 0:
+        latest_run = runs[0]
+        emoji, color, status_text, css_class = get_status_info(
+            latest_run.state.life_cycle_state,
+            latest_run.state.result_state
+        )
+        if status_text == "SUCCESS":
+            card_class += " job-card-success"
+        elif status_text == "FAILED":
+            card_class += " job-card-failed"
+        elif status_text == "RUNNING":
+            card_class += " job-card-running"
     
     # Determine if this job should be expanded
     is_expanded = (st.session_state.selected_job is None or 
@@ -181,25 +206,37 @@ def display_job_card(client, job_config):
     
     # Create expandable section for each job
     with st.expander(f"📊 **{display_name}**", expanded=is_expanded):
-        # Job overview section
-        col1, col2, col3, col4 = st.columns([2, 2, 1, 1])
+        # Job overview section - compact layout
+        # Check if cancel button should be shown
+        show_cancel = False
+        if runs and len(runs) > 0:
+            latest_run = runs[0]
+            if latest_run.state.life_cycle_state in [RunLifeCycleState.RUNNING, RunLifeCycleState.PENDING]:
+                show_cancel = True
+        
+        # Use 3 columns if no cancel button, 4 if cancel button needed
+        if show_cancel:
+            col1, col2, col3, col4 = st.columns([3, 2, 1, 1])
+        else:
+            col1, col2, col3 = st.columns([3, 2, 1])
         
         with col1:
             st.markdown(f"**Job Name:** {job.settings.name}")
+            st.caption(f"Job ID: {job_id}")
         
         with col2:
             if runs and len(runs) > 0:
                 latest_run = runs[0]
-                emoji, color, status_text = get_status_info(
+                emoji, color, status_text, css_class = get_status_info(
                     latest_run.state.life_cycle_state,
                     latest_run.state.result_state
                 )
-                st.markdown(f"**Latest Status:** {emoji} {status_text}")
+                st.markdown(f'**Latest Status:** <span class="status-badge {css_class}">{emoji} {status_text}</span>', unsafe_allow_html=True)
             else:
                 st.markdown("**Latest Status:** No runs found")
         
         with col3:
-            if st.button("▶️ Trigger Run", key=f"trigger_{job_id}"):
+            if st.button("▶️ Trigger", key=f"trigger_{job_id}", use_container_width=True):
                 with st.spinner("Triggering job..."):
                     result = trigger_job_run(client, job_id)
                     if result:
@@ -207,27 +244,22 @@ def display_job_card(client, job_config):
                         time.sleep(1)
                         st.rerun()
         
-        with col4:
-            # Show cancel button only if there's a running job
-            if runs and len(runs) > 0:
-                latest_run = runs[0]
-                if latest_run.state.life_cycle_state in [RunLifeCycleState.RUNNING, RunLifeCycleState.PENDING]:
-                    if st.button("⏹️ Cancel", key=f"cancel_{latest_run.run_id}"):
-                        with st.spinner("Cancelling run..."):
-                            if cancel_job_run(client, latest_run.run_id):
-                                st.success("✅ Run cancelled!")
-                                time.sleep(1)
-                                st.rerun()
-        
-        st.divider()
+        if show_cancel:
+            with col4:
+                if st.button("⏹️ Cancel", key=f"cancel_{runs[0].run_id}", use_container_width=True):
+                    with st.spinner("Cancelling run..."):
+                        if cancel_job_run(client, runs[0].run_id):
+                            st.success("✅ Run cancelled!")
+                            time.sleep(1)
+                            st.rerun()
         
         # Run history section
-        st.markdown("### Run History (Last 10)")
+        st.markdown(f'<div class="sub-header-compact">Run History (Last {Config.DEFAULT_RUN_HISTORY_LIMIT})</div>', unsafe_allow_html=True)
         
         if runs and len(runs) > 0:
             run_data = []
             for run in runs:
-                emoji, color, status_text = get_status_info(
+                emoji, color, status_text, css_class = get_status_info(
                     run.state.life_cycle_state,
                     run.state.result_state
                 )
@@ -247,7 +279,7 @@ def display_job_card(client, job_config):
             st.dataframe(
                 df,
                 column_config={
-                    "Run Page URL": st.column_config.LinkColumn("Run Page URL")
+                    "Run Page URL": st.column_config.LinkColumn("Run Page URL", display_text="View in Databricks")
                 },
                 hide_index=True,
                 use_container_width=True,
@@ -259,92 +291,16 @@ def display_job_card(client, job_config):
 
 def main():
     """Main application"""
-    st.title("🔄 Databricks Job Monitor")
-    st.markdown("Monitor, trigger, and manage your Databricks jobs in real-time")
-    
     # Load job configuration early for sidebar
     jobs = load_config()
     
-    # Sidebar
-    with st.sidebar:
-        st.header("⚙️ Controls")
-        
-        # Manual refresh button
-        if st.button("🔄 Refresh Now", use_container_width=True):
-            st.session_state.last_refresh = time.time()
-            st.rerun()
-        
-        st.divider()
-        
-        # Job Navigation
-        if jobs and len(jobs) > 0:
-            st.markdown("### 📋 Jobs")
-            job_names = ["All Jobs"] + [job.get('display_name', f"Job {job['job_id']}") for job in jobs]
-            
-            selected = st.radio(
-                "Select a job to navigate:",
-                job_names,
-                index=0,
-                label_visibility="collapsed"
-            )
-            
-            if selected == "All Jobs":
-                st.session_state.selected_job = None
-            else:
-                st.session_state.selected_job = selected
-            
-            st.divider()
-        
-        # Auto-refresh toggle
-        st.markdown("### Auto-Refresh")
-        auto_refresh = st.toggle("Enable Auto-Refresh", value=st.session_state.auto_refresh)
-        st.session_state.auto_refresh = auto_refresh
-        
-        if auto_refresh:
-            refresh_interval = st.slider(
-                "Refresh Interval (seconds)",
-                min_value=10,
-                max_value=300,
-                value=st.session_state.refresh_interval,
-                step=10
-            )
-            st.session_state.refresh_interval = refresh_interval
-            
-            # Show time until next refresh
-            elapsed = time.time() - st.session_state.last_refresh
-            remaining = max(0, refresh_interval - elapsed)
-            st.info(f"⏱️ Next refresh in: {int(remaining)}s")
-            
-            # Auto-refresh logic
-            if elapsed >= refresh_interval:
-                st.session_state.last_refresh = time.time()
-                st.rerun()
-        
-        st.divider()
-        
-        # Connection status
-        st.markdown("### Connection Status")
-        try:
-            host = st.secrets.get("DATABRICKS_HOST")
-            token = st.secrets.get("DATABRICKS_TOKEN")
-        except:
-            host = os.getenv('DATABRICKS_HOST')
-            token = os.getenv('DATABRICKS_TOKEN')
-        
-        if host and token:
-            st.success("✅ Connected")
-            st.caption(f"Host: {host}")
-        else:
-            st.error("❌ Not configured")
-            st.caption("Check your .env file")
-        
-        st.divider()
-        
-        # Last refresh time
-        last_refresh_str = datetime.fromtimestamp(st.session_state.last_refresh).strftime("%H:%M:%S")
-        st.caption(f"Last refreshed: {last_refresh_str}")
+    # Render sidebar and get filters
+    filters = render_sidebar(jobs, st.session_state)
     
-    # Main content
+    # Main content area
+    st.markdown(f'<div class="main-header">{Config.APP_ICON} {Config.APP_TITLE}</div>', unsafe_allow_html=True)
+    st.markdown(f'<p class="main-subtitle">{Config.APP_SUBTITLE}</p>', unsafe_allow_html=True)
+    
     # Initialize client
     client = init_databricks_client()
     if not client:
@@ -370,10 +326,54 @@ jobs:
         """)
         return
     
+    # Display summary metrics
+    st.markdown('<div class="sub-header">📈 Overview</div>', unsafe_allow_html=True)
+    
+    # Calculate metrics
+    total_jobs = len(jobs)
+    
+    # Quick stats row
+    metric_cols = st.columns(4)
+    with metric_cols[0]:
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-value">{total_jobs}</div>
+            <div class="metric-label">Jobs Monitored</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with metric_cols[1]:
+        tz_name = Config.DISPLAY_TIMEZONE.split('/')[-1].replace('_', ' ')
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-value">{tz_name}</div>
+            <div class="metric-label">Timezone</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with metric_cols[2]:
+        refresh_status = "ON" if st.session_state.auto_refresh else "OFF"
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-value">{refresh_status}</div>
+            <div class="metric-label">Auto-Refresh</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with metric_cols[3]:
+        interval = st.session_state.refresh_interval if st.session_state.auto_refresh else "-"
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-value">{interval}s</div>
+            <div class="metric-label">Refresh Interval</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
     # Display job cards
+    st.markdown('<div class="sub-header">📋 Job Details</div>', unsafe_allow_html=True)
+    
     for job_config in jobs:
         display_job_card(client, job_config)
-        st.markdown("---")
     
     # Auto-refresh placeholder to trigger rerun
     if st.session_state.auto_refresh:
@@ -382,4 +382,3 @@ jobs:
 
 if __name__ == "__main__":
     main()
-
